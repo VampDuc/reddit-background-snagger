@@ -196,9 +196,8 @@ def get_images(sub):
                 continue
             else:
                 image = data["url"]
-                basename = os.path.basename(f'{sub}_{saved_images}.jpg')
+                basename = os.path.basename(f'{sub}_{data["id"]}.jpg')
                 file = f'{save_dest}{basename}'
-                hash = False
                 if basename != "":
                     skip = False
                     save_image = requests.get(image)
