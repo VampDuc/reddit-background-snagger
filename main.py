@@ -1,10 +1,10 @@
 import getpass  # username
-import json as j  # parse JSON
+import hashlib
 import magic  # py-magic-bin for mimetypes
 import os  # OS things
 from PIL import Image  # Image handling
 import requests  # GET requests
-import time  # Timouts
+import time  # Timeouts
 # Windows notifications
 from win11toast import notify, update_progress, toast
 
@@ -35,6 +35,7 @@ toast_popup = False
 timeout_counter = 0
 min_images = 50
 mime = magic.Magic(mime=True)
+hashes = []
 
 
 def make_toast():
@@ -104,8 +105,10 @@ def is_valid_image(full_path):
         # Get image dimensions for next steps
     width = 0
     height = 0
+    img_hash = False
     try:
         img = Image.open(full_path)
+        img_hash = hashlib.md5(Image.open(full_path).tobytes()).digest()
         width = img.width
         height = img.height
 
@@ -113,7 +116,10 @@ def is_valid_image(full_path):
     except:
         # Can't open file, remove it
         return False
-
+    print(img_hash)
+    print(hashes)
+    if img_hash in hashes:  # recently saved; don't save it again
+        return False
     if width == 0 or height == 0:  # 0 dimensions either way, invalid
         return False
     if width < height:  # probably portrait aspect
@@ -192,16 +198,18 @@ def get_images(sub):
                 image = data["url"]
                 basename = os.path.basename(f'{sub}_{saved_images}.jpg')
                 file = f'{save_dest}{basename}'
+                hash = False
                 if basename != "":
                     skip = False
                     save_image = requests.get(image)
                     try:
                         open(file, 'wb').write(save_image.content)
+
                     except:
                         skip = True
 
                     if not is_valid_image(file) or skip:
-                        if os.path.exists(file):  # fail safe in case file didn't fail earlier
+                        if os.path.exists(file):  # failsafe in case file didn't fail earlier
                             os.remove(file)
                     else:
                         saved_images += 1
@@ -215,39 +223,47 @@ def get_images(sub):
 
 def clear_old_images():
     # Reset the folder for new files
-
+    global hashes
     images = os.listdir(save_dest)
-
-    # No need to continue if we're under the threshold
-    if len(images) <= min_images:
-        return
+    old_files = {}
 
     update_progress({
         'title': 'Clearing old images',
-        'status': 'Deleting...',
+        'status': 'Checking...',
         'value': 0,
     })
 
-    old_files = {}
 
-    # Get the list of images in the folder and sort them by timestamp
+
     for image in images:
         try:
             image_path = os.path.join(save_dest, image)
             if mime.from_file(image_path) == "image/jpeg":
+                # Get the list of images in the folder and sort them by timestamp
                 old_files[os.path.getmtime(image_path)] = image_path
+                # also get the hashes of the current/most recent files
+                hashes.append(hashlib.md5(Image.open(image_path).tobytes()).digest())
         except:
             pass
+
+    # No need to continue if we're under the threshold
+    # but we want to do the above to get the hashes
+    if len(images) <= min_images:
+        update_progress({'value': 'Nothing to clean!'})
+        return
+
     timestamps = list(old_files.keys())
     timestamps.sort()
     sorted_files = {i: old_files[i] for i in timestamps}
+
+    update_progress({'value': 'Deleting...'})
 
     # Remove only the extra files
     counter = len(images)
     toast_counter = 0
     toast_total = counter - min_images
-    for i in old_files:
-        os.remove(f"{old_files[i]}")
+    for i in sorted_files:
+        os.remove(f"{sorted_files[i]}")
         time.sleep(.01)
         update_progress(
             {'value': toast_counter / toast_total, 'valueStringOverride': f'{toast_counter}/{toast_total} images'})
@@ -277,7 +293,7 @@ def ensure_setup():
 def start_application():
     # Give the computer time to wake up and connect to the internet
     # This section happens silently
-    time.sleep(300)
+    # time.sleep(300)
 
     # Make sure reddit is accessable
     try:
