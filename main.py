@@ -1,5 +1,7 @@
 import getpass  # username
 import hashlib
+import sys
+
 import magic  # py-magic-bin for mimetypes
 import os  # OS things
 from PIL import Image  # Image handling
@@ -312,7 +314,7 @@ def ensure_setup():
 def start_application():
     # if we're under 24 hours since last complete run, stop the application
     if last_run < last_run + 86400:
-        exit()
+       sys.exit()
 
     # Give the computer time to wake up and connect to the internet
     # This section happens silently
