@@ -31,6 +31,7 @@ allowed_timeouts = 5
 
 # set globals
 config_location = 'C:\\Reddit Background Snagger'
+last_run = 0
 toast_popup = False
 timeout_counter = 0
 min_images = 50
@@ -59,6 +60,7 @@ def load_config():
     global allowed_timeouts
     global save_dest
     global min_images
+    global last_run
 
     subs = []
     with open(config_location + '\\config.txt', 'r') as f:
@@ -80,7 +82,26 @@ def load_config():
                     subs.append(value)
                 if param == 'min_images':
                     min_images = int(value)
+                if param == 'last_run':
+                    last_run = round(float(value), 0)
     subreddits = subs
+
+
+def update_config(config, new_value):
+    existing = []
+    with open(config_location + '\\config.txt', 'r') as f:
+        linesn = f.read()
+        existing = linesn.split("\n")
+
+    with open(config_location + '\\config.txt', 'w+') as f:
+        for line in existing:
+            if '|' in line:
+                param, value = line.split('|')
+                if param == config:
+                    f.write(f'{config}|{new_value}' + "\n")
+                else:
+                    f.write(line + "\n")
+
 
 
 def add_to_timeout():
@@ -232,8 +253,6 @@ def clear_old_images():
         'value': 0,
     })
 
-
-
     for image in images:
         try:
             image_path = os.path.join(save_dest, image)
@@ -284,17 +303,22 @@ def ensure_setup():
         with open(config_location + '\\config.txt', 'w') as f:
             f.write(f'save_destination|{save_dest}' + "\n")
             f.write(f'max_connection_attempts|{allowed_timeouts}' + "\n")
-            f.write(f'min_images|{min_images}')
+            f.write(f'min_images|{min_images}' + "\n")
             for sub in subreddits:
                 f.write(f'subreddit|{sub}' + "\n")
+            f.write(f'last_run|{time.time()}')
 
 
 def start_application():
+    # if we're under 24 hours since last complete run, stop the application
+    if last_run < last_run + 86400:
+        exit()
+
     # Give the computer time to wake up and connect to the internet
     # This section happens silently
     time.sleep(300)
 
-    # Make sure reddit is accessable
+    # Make sure reddit is accessible
     try:
         test = requests.get('https://reddit.com')
         result = test.status_code
@@ -349,4 +373,7 @@ if __name__ == '__main__':
                 counter += 1
             time.sleep(.1)
             update_progress({'value': 1, 'valueStringOverride': f'Naptime over!'})
+
+    # update the last time the application was run
+    update_config('last_run', time.time())
 
