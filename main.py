@@ -1,5 +1,6 @@
 import getpass  # username
 import hashlib
+import shutil
 import sys
 
 import magic  # py-magic-bin for mimetypes
@@ -29,6 +30,7 @@ subreddits = [
     "wallpaper"
 ]
 save_dest = f"C:\\Users\\{getpass.getuser()}\\Pictures\\Reddit Backgrounds\\"
+always_images = f"C:\\Users\\{getpass.getuser()}\\Pictures\\Reddit Backgrounds\\Keepers"
 allowed_timeouts = 5
 
 # set globals
@@ -61,6 +63,7 @@ def load_config():
     global subreddits
     global allowed_timeouts
     global save_dest
+    global always_images
     global min_images
     global last_run
 
@@ -72,18 +75,33 @@ def load_config():
             if '|' in line:
                 param, value = line.split('|')
 
-                if param == 'save_destination':  # where to save files
-                    save_dest = value
+                # File destinations
+                if param == 'save_destination' or param == 'always_images':
+                    # Ensure end slashes
                     if value[-1] != chr(92):
-                        save_dest += chr(92)
-                    if not os.path.exists(save_dest):
-                        os.mkdir(save_dest)
-                if param == 'max_connect_attempt':  # allowable connection attempts
+                        value += chr(92)
+                    # Ensure folders actually exist
+                    if not os.path.exists(value):
+                        os.mkdir(value)
+
+                    if param == 'save_destination':
+                        save_dest = value
+                    elif param == 'always_images':
+                        always_images = value
+
+                # allowable connection attempts
+                if param == 'max_connect_attempt':
                     allowed_timeouts = int(value)
-                if param == 'subreddit':  # subreddit list
+
+                # subreddit list
+                if param == 'subreddit':
                     subs.append(value)
+
+                # minimum images to keep per run
                 if param == 'min_images':
                     min_images = int(value)
+
+                # last time application was run
                 if param == 'last_run':
                     last_run = round(float(value), 0)
     subreddits = subs
@@ -103,7 +121,6 @@ def update_config(config, new_value):
                     f.write(f'{config}|{new_value}' + "\n")
                 else:
                     f.write(line + "\n")
-
 
 
 def add_to_timeout():
@@ -139,8 +156,7 @@ def is_valid_image(full_path):
     except:
         # Can't open file, remove it
         return False
-    print(img_hash)
-    print(hashes)
+
     if img_hash in hashes:  # recently saved; don't save it again
         return False
     if width == 0 or height == 0:  # 0 dimensions either way, invalid
@@ -226,7 +242,6 @@ def get_images(sub):
                     save_image = requests.get(image)
                     try:
                         open(file, 'wb').write(save_image.content)
-
                     except:
                         skip = True
 
@@ -243,10 +258,33 @@ def get_images(sub):
         reset_timeout()
 
 
+def copy_keepers():
+    keepers = os.listdir(always_images)
+
+    if len(keepers) == 0:
+        return
+
+    update_progress({
+        'title': f'Copying Keepers',
+        'status': '',
+        'value': 0,
+        'valueStringOverride': '',
+    })
+
+    for keeper in keepers:
+        copy_from = os.path.join(always_images, keeper)
+        copy_to = save_dest + keeper
+        shutil.copy(copy_from, copy_to)
+
+    update_progress({'value': 1, 'valueStringOverride': f'Done!'})
+
+
 def clear_old_images():
     # Reset the folder for new files
     global hashes
     images = os.listdir(save_dest)
+    keepers = os.listdir(always_images)
+    total_images = len(images) - len(keepers)
     old_files = {}
 
     update_progress({
@@ -258,17 +296,27 @@ def clear_old_images():
     for image in images:
         try:
             image_path = os.path.join(save_dest, image)
+            # Only continue if the item is a jpeg
             if mime.from_file(image_path) == "image/jpeg":
-                # Get the list of images in the folder and sort them by timestamp
+
+                # Check if the image is a keeper, if so, remove here so as not to affect
+                # the retention count.
+                # Also, get its hash to avoid duplicating.
+                if os.path.basename in keepers:
+                    hashes.append(hashlib.md5(Image.open(image_path).tobytes()).digest())
+                    os.remove(image_path)
+
+                # Sort any remaining images in the folder by timestamp
                 old_files[os.path.getmtime(image_path)] = image_path
-                # also get the hashes of the current/most recent files
-                hashes.append(hashlib.md5(Image.open(image_path).tobytes()).digest())
+
+                # If we're not going to delete anything, get the hashes here
+                if total_images <= min_images:
+                    hashes.append(hashlib.md5(Image.open(image_path).tobytes()).digest())
         except:
             pass
 
-    # No need to continue if we're under the threshold
-    # but we want to do the above to get the hashes
-    if len(images) <= min_images:
+    # No need to delete anything if we are under the threshold
+    if total_images <= min_images:
         update_progress({'value': 'Nothing to clean!'})
         return
 
@@ -290,7 +338,9 @@ def clear_old_images():
         counter -= 1
         toast_counter += 1
         if counter <= min_images:
-            break
+            # Only get hashes of remaining images.
+            # This will allow old items to recycle from reddit.
+            hashes.append(hashlib.md5(Image.open(sorted_files[i]).tobytes()).digest())
 
     time.sleep(.5)
     update_progress(
@@ -304,6 +354,7 @@ def ensure_setup():
     if not os.path.exists(config_location + '\\config.txt'):
         with open(config_location + '\\config.txt', 'w') as f:
             f.write(f'save_destination|{save_dest}' + "\n")
+            f.write(f'always_images|{always_images}')
             f.write(f'max_connection_attempts|{allowed_timeouts}' + "\n")
             f.write(f'min_images|{min_images}' + "\n")
             for sub in subreddits:
@@ -314,11 +365,11 @@ def ensure_setup():
 def start_application():
     # if we're under 24 hours since last complete run, stop the application
     if time.time() <= last_run + 86400:
-       sys.exit()
+        sys.exit()
 
     # Give the computer time to wake up and connect to the internet
     # This section happens silently
-    time.sleep(300)
+    # time.sleep(300)
 
     # Make sure reddit is accessible
     try:
@@ -348,7 +399,7 @@ if __name__ == '__main__':
     start_application()  # ensure reddit is good
 
     make_toast()  # let the user know we're starting
-    clear_old_images()  # clear the old directory
+    clear_old_images()  # clear the directory for new images
 
     sub_counter = 0
     for sub in subreddits:  # Start trying to get images
@@ -376,6 +427,7 @@ if __name__ == '__main__':
             time.sleep(.1)
             update_progress({'value': 1, 'valueStringOverride': f'Naptime over!'})
 
+    copy_keepers()
+
     # update the last time the application was run
     update_config('last_run', time.time())
-
