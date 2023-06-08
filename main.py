@@ -313,7 +313,7 @@ def ensure_setup():
 
 def start_application():
     # if we're under 24 hours since last complete run, stop the application
-    if last_run < last_run + 86400:
+    if time.time() <= last_run + 86400:
        sys.exit()
 
     # Give the computer time to wake up and connect to the internet
